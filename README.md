@@ -89,27 +89,78 @@ Open http://localhost:8000/docs for the interactive Swagger UI.
 | POST   | `/queries/{name}` | Run a named query (params in JSON body)    |
 | POST   | `/query`          | Dev-only ad-hoc read query                |
 
-## Deploy to Azure (App Service, container)
+## Deploy to Azure (App Service, Linux container)
+
+The container installs the MS ODBC Driver 18 and runs uvicorn on port 8000.
+The SPN client secret is **not** stored in app settings — the App Service uses
+a system-assigned managed identity to read it from Key Vault. Replace
+`<unique-acr>`, `<app>`, `<rg>`, `<unique-kv>`, and the placeholder values.
+
+### 1. Registry + image
 
 ```powershell
 az group create -n rg-lakehouse-api -l southeastasia
-az acr create -n <unique-acr> -g rg-lakehouse-api --sku Basic --admin-enabled true
+az acr create -n <unique-acr> -g rg-lakehouse-api --sku Basic
 az acr build --registry <unique-acr> --image lakehouse-api:latest .
-
-az appservice plan create -n plan-lakehouse-api -g rg-lakehouse-api --is-linux --sku B2
-az webapp create -n app-lakehouse-api -g rg-lakehouse-api `
-  --plan plan-lakehouse-api `
-  --deployment-container-image-name <unique-acr>.azurecr.io/lakehouse-api:latest
-
-az webapp config appsettings set -n app-lakehouse-api -g rg-lakehouse-api `
-  --settings WEBSITES_PORT=8000 `
-  AZURE_TENANT_ID=... FABRIC_CLIENT_ID=... FABRIC_CLIENT_SECRET=... `
-  FABRIC_SQL_SERVER=... FABRIC_SQL_DATABASE=...
 ```
 
-Link ACR to the webapp (or use its admin creds) so it can pull the image.
-Prefer a **managed identity** + Key Vault for the secret in production rather
-than app settings.
+### 2. App Service (Linux) pulling the image via its managed identity
+
+```powershell
+az appservice plan create -n plan-lakehouse-api -g rg-lakehouse-api --is-linux --sku B2
+az webapp create -n <app> -g rg-lakehouse-api --plan plan-lakehouse-api `
+  --deployment-container-image-name <unique-acr>.azurecr.io/lakehouse-api:latest
+
+# Enable a system-assigned managed identity
+az webapp identity assign -n <app> -g rg-lakehouse-api
+
+# Allow it to pull from ACR
+$acrId = az acr show -n <unique-acr> -g rg-lakehouse-api --query id -o tsv
+$miId  = az webapp identity show -n <app> -g rg-lakehouse-api --query principalId -o tsv
+az role assignment create --role AcrPull --assignee-object-id $miId `
+  --assignee-principal-type ServicePrincipal --scope $acrId
+
+az webapp config container set -n <app> -g rg-lakehouse-api `
+  --docker-image <unique-acr>.azurecr.io/lakehouse-api:latest `
+  --docker-registry-server-url https://<unique-acr>.azurecr.io
+```
+
+### 3. Key Vault: store the SPN secret and grant the identity read access
+
+```powershell
+az keyvault create -n <unique-kv> -g rg-lakehouse-api --enable-rbac-authorization true
+az keyvault secret set --vault-name <unique-kv> --name fabric-spn-secret `
+  --value "<SPN-CLIENT-SECRET>"
+
+$kvId = az keyvault show -n <unique-kv> -g rg-lakehouse-api --query id -o tsv
+az role assignment create --role "Key Vault Secrets User" `
+  --assignee-object-id $miId --assignee-principal-type ServicePrincipal --scope $kvId
+```
+
+### 4. App settings (non-secret config only — the secret lives in Key Vault)
+
+```powershell
+az webapp config appsettings set -n <app> -g rg-lakehouse-api --settings `
+  WEBSITES_PORT=8000 `
+  AZURE_TENANT_ID=<tenant-id> `
+  FABRIC_CLIENT_ID=<spn-client-id> `
+  FABRIC_SQL_SERVER=<fabric-sql-server>,1433 `
+  FABRIC_SQL_DATABASE=<database> `
+  KEY_VAULT_URL=https://<unique-kv>.vault.azure.net `
+  FABRIC_CLIENT_SECRET_NAME=fabric-spn-secret
+```
+
+`FABRIC_CLIENT_SECRET` is deliberately **not** set here; the app reads it from
+Key Vault using the managed identity.
+
+### 5. Restart and check
+
+```powershell
+az webapp restart -n <app> -g rg-lakehouse-api
+```
+
+Open `https://<app>.azurewebsites.net/readyz` — it authenticates as the SPN and
+runs `SELECT 1`.
 
 ## Hosting on Azure Functions instead?
 

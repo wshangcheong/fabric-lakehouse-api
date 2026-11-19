@@ -22,14 +22,55 @@ from .config import settings
 # SQL_COPT_SS_ACCESS_TOKEN: pre-connection attribute carrying an Entra token.
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
+# Cached for the process lifetime: the SPN secret and the credential (which
+# itself caches the access token until it expires), so we don't hit Key Vault
+# or re-authenticate on every request.
+_spn_secret: str | None = None
+_credential: ClientSecretCredential | None = None
+
+
+def _spn_client_secret() -> str:
+    """Return the SPN client secret, cached for the process lifetime.
+
+    In Azure: fetched from Key Vault using the App Service's managed identity
+    (when KEY_VAULT_URL is set). Locally: read from FABRIC_CLIENT_SECRET (.env).
+    """
+    global _spn_secret
+    if _spn_secret is not None:
+        return _spn_secret
+    if settings.KEY_VAULT_URL:
+        from azure.identity import DefaultAzureCredential
+        from azure.keyvault.secrets import SecretClient
+
+        client = SecretClient(
+            vault_url=settings.KEY_VAULT_URL,
+            credential=DefaultAzureCredential(),
+        )
+        _spn_secret = client.get_secret(settings.FABRIC_CLIENT_SECRET_NAME).value
+    else:
+        _spn_secret = settings.FABRIC_CLIENT_SECRET.get_secret_value()
+    if not _spn_secret:
+        raise ValueError(
+            "SPN client secret not available. Locally: set FABRIC_CLIENT_SECRET "
+            "in .env. In Azure: set KEY_VAULT_URL (and FABRIC_CLIENT_SECRET_NAME) "
+            "and grant the App Service managed identity Key Vault Secrets User."
+        )
+    return _spn_secret
+
+
+def _credential() -> ClientSecretCredential:
+    global _credential
+    if _credential is None:
+        _credential = ClientSecretCredential(
+            tenant_id=settings.AZURE_TENANT_ID,
+            client_id=settings.FABRIC_CLIENT_ID,
+            client_secret=_spn_client_secret(),
+        )
+    return _credential
+
 
 def _access_token_bytes() -> bytes:
-    credential = ClientSecretCredential(
-        tenant_id=settings.AZURE_TENANT_ID,
-        client_id=settings.FABRIC_CLIENT_ID,
-        client_secret=settings.FABRIC_CLIENT_SECRET.get_secret_value(),
-    )
-    token = credential.get_token(settings.FABRIC_SQL_SCOPE)
+    token = _credential().get_token(settings.FABRIC_SQL_SCOPE)
     # The driver expects the token encoded as UTF-16-LE, prefixed by a
     # 4-byte little-endian byte length.
     encoded = token.token.encode("utf-16-le")

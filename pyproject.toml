@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30,<0.40",
     "pyodbc>=5.0,<6",
     "azure-identity>=1.16,<2",
+    "azure-keyvault-secrets>=4.8,<5",
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.3,<3",
 ]

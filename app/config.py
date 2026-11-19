@@ -9,7 +9,12 @@ class Settings(BaseSettings):
     # (app -> data access). REST API client auth is handled later by APIM.
     AZURE_TENANT_ID: str
     FABRIC_CLIENT_ID: str
-    FABRIC_CLIENT_SECRET: SecretStr
+    # Local dev: set in .env. In Azure: leave empty and set KEY_VAULT_URL; the
+    # app fetches it from Key Vault via the App Service managed identity.
+    FABRIC_CLIENT_SECRET: SecretStr = SecretStr("")
+    # Azure Key Vault holding the SPN secret. Empty in local dev.
+    KEY_VAULT_URL: str = ""
+    FABRIC_CLIENT_SECRET_NAME: str = "fabric-spn-secret"
 
     # Fabric Lakehouse SQL analytics endpoint (TDS).
     FABRIC_SQL_SERVER: str
