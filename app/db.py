@@ -26,7 +26,7 @@ SQL_COPT_SS_ACCESS_TOKEN = 1256
 # itself caches the access token until it expires), so we don't hit Key Vault
 # or re-authenticate on every request.
 _spn_secret: str | None = None
-_credential: ClientSecretCredential | None = None
+_client_credential: ClientSecretCredential | None = None
 
 
 def _spn_client_secret() -> str:
