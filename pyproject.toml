@@ -1,0 +1,17 @@
+[project]
+name = "lakehouse-api"
+version = "0.1.0"
+description = "REST API exposing Microsoft Fabric Lakehouse data over its SQL analytics endpoint"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110,<0.120",
+    "uvicorn[standard]>=0.30,<0.40",
+    "pyodbc>=5.0,<6",
+    "azure-identity>=1.16,<2",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.3,<3",
+]
+
+# Application project (run directly via uvicorn), not built/installed as a package.
+[tool.uv]
+package = false
