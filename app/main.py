@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pyodbc
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from .config import settings
@@ -28,7 +28,7 @@ app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 def root():
     return {
         "name": settings.APP_NAME,
-        "endpoints": ["/healthz", "/readyz", "/tables", "/queries", "/query"],
+        "endpoints": ["/healthz", "/readyz", "/tables", "/patients", "/queries", "/query"],
     }
 
 
@@ -66,6 +66,23 @@ def list_tables(conn: pyodbc.Connection = Depends(get_db)):
         "FROM INFORMATION_SCHEMA.TABLES "
         "WHERE TABLE_TYPE = 'BASE TABLE' "
         "ORDER BY TABLE_SCHEMA, TABLE_NAME"
+    )
+    return rows_to_json(cur)
+
+
+@app.get("/patients")
+def find_patients(
+    facility_code: str = Query(alias="FacilityCode", min_length=1),
+    pid: str = Query(alias="PID", min_length=1),
+    visit_number: str = Query(alias="VisitNumber", min_length=1),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    cur = conn.execute(
+        "SELECT * FROM [dbo].[patient] "
+        "WHERE [FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?",
+        facility_code,
+        pid,
+        visit_number,
     )
     return rows_to_json(cur)
 
