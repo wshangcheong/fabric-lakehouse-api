@@ -59,14 +59,14 @@ def _spn_client_secret() -> str:
 
 
 def _credential() -> ClientSecretCredential:
-    global _credential
-    if _credential is None:
-        _credential = ClientSecretCredential(
+    global _client_credential
+    if _client_credential is None:
+        _client_credential = ClientSecretCredential(
             tenant_id=settings.AZURE_TENANT_ID,
             client_id=settings.FABRIC_CLIENT_ID,
             client_secret=_spn_client_secret(),
         )
-    return _credential
+    return _client_credential
 
 
 def _access_token_bytes() -> bytes:
@@ -78,9 +78,12 @@ def _access_token_bytes() -> bytes:
 
 
 def _connection_string() -> str:
+    server = settings.FABRIC_SQL_SERVER.strip()
+    if "," not in server:
+        server = f"{server},1433"
     parts = [
         f"Driver={{{settings.ODBC_DRIVER}}}",
-        f"Server={settings.FABRIC_SQL_SERVER},1433",
+        f"Server={server}",
         "Encrypt=yes",
         "TrustServerCertificate=no",
     ]
