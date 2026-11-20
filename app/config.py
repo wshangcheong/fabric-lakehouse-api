@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "lakehouse-api"
     LOG_LEVEL: str = "INFO"
 
+    ENABLE_DEV_ENDPOINTS: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
