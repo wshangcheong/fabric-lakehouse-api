@@ -44,16 +44,14 @@ steps:
           --resource-group "$(resourceGroupName)" \
           --container-image-name "$(acrName).azurecr.io/$(imageName):$(Build.BuildId)"
 
-  # 3. Extract openapi.json from FastAPI and sync to APIM
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.11'
-    displayName: 'Use Python 3.11'
-
+  # 3. Extract openapi.json from FastAPI using uv and sync to APIM
   - script: |
-      pip install -r requirements.txt
-      python -c "import json; from app.main import app; print(json.dumps(app.openapi()))" > $(Build.ArtifactStagingDirectory)/openapi.json
-    displayName: 'Generate openapi.json'
+      curl -LsSf https://astral.sh | sh
+      export PATH="$HOME/.local/bin:$PATH"
+      uv sync --frozen --no-dev
+      uv run python -c "import json; from app.main import app; print(json.dumps(app.openapi()))" > $(Build.ArtifactStagingDirectory)/openapi.json
+    displayName: 'Generate openapi.json (uv)'
+
 
   - task: AzureCLI@2
     displayName: 'Sync OpenAPI Spec to APIM'

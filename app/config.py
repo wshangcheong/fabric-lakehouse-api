@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     # Entra service principal used to authenticate to the Fabric lakehouse
     # (app -> data access). REST API client auth is handled later by APIM.
-    AZURE_TENANT_ID: str
+    AZURE_TENANT_ID: str = ""
     FABRIC_CLIENT_ID: str | None = None
     # Local dev: set in .env. In Azure: leave empty and set KEY_VAULT_URL; the
     # app fetches it from Key Vault via the App Service managed identity.
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     FABRIC_CLIENT_SECRET_NAME: str = "fabric-spn-secret"
 
     # Fabric Lakehouse SQL analytics endpoint (TDS).
-    FABRIC_SQL_SERVER: str
+    FABRIC_SQL_SERVER: str = ""
     FABRIC_SQL_DATABASE: str = ""
     FABRIC_SQL_SCOPE: str = "https://database.windows.net/.default"
     ODBC_DRIVER: str = "ODBC Driver 18 for SQL Server"
