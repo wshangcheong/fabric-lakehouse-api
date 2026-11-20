@@ -46,8 +46,7 @@ steps:
 
   # 3. Extract openapi.json from FastAPI using uv and sync to APIM
   - script: |
-      curl -LsSf https://astral.sh | sh
-      export PATH="$HOME/.local/bin:$PATH"
+      pip install uv
       uv sync --frozen --no-dev
       uv run python -c "import json; from app.main import app; print(json.dumps(app.openapi()))" > $(Build.ArtifactStagingDirectory)/openapi.json
     displayName: 'Generate openapi.json (uv)'
