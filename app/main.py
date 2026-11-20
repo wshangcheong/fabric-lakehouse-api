@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import pyodbc
@@ -23,6 +24,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan, openapi_version="3.0.2")
+
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -40,11 +43,44 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
+@dataclass
+class PatientLookupParams:
+    facility_code: str = Query(alias="FacilityCode", min_length=1)
+    pid: str = Query(alias="PID", min_length=1)
+    visit_number: str = Query(alias="VisitNumber", min_length=1)
+
+
+def _fetch_patient_table(
+    table_name: str,
+    params: PatientLookupParams,
+    conn: pyodbc.Connection,
+) -> list[dict[str, Any]]:
+    cur = conn.execute(
+        f"SELECT * FROM [dbo].[{table_name}] "
+        "WHERE [FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?",
+        params.facility_code,
+        params.pid,
+        params.visit_number,
+    )
+    return rows_to_json(cur)
+
+
 @app.get("/")
 def root():
     return {
         "name": settings.APP_NAME,
-        "endpoints": ["/healthz", "/readyz", "/tables", "/patients", "/queries", "/query"],
+        "endpoints": [
+            "/healthz",
+            "/readyz",
+            "/tables",
+            "/patients",
+            "/patient-admission",
+            "/patient-diagnosis",
+            "/patient-billheader",
+            "/patient-progressnotes",
+            "/queries",
+            "/query",
+        ],
     }
 
 
@@ -55,9 +91,9 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    """Verifies the data path: authenticates as the SPN and runs SELECT 1.
+    """Verifies the data path: authenticates via Managed Identity and runs SELECT 1.
 
-    Opens the connection (and acquires the SPN token) inside the try block so
+    Opens the connection (and acquires the token) inside the try block so
     that auth/driver/network failures surface with a real message instead of
     a bare 500.
     """
@@ -88,19 +124,42 @@ def list_tables(conn: pyodbc.Connection = Depends(get_db)):
 
 @app.get("/patients")
 def get_patient(
-    facility_code: str = Query(alias="FacilityCode", min_length=1),
-    pid: str = Query(alias="PID", min_length=1),
-    visit_number: str = Query(alias="VisitNumber", min_length=1),
+    params: PatientLookupParams = Depends(),
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    cur = conn.execute(
-        "SELECT * FROM [dbo].[patient] "
-        "WHERE [FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?",
-        facility_code,
-        pid,
-        visit_number,
-    )
-    return rows_to_json(cur)
+    return _fetch_patient_table("patient", params, conn)
+
+
+@app.get("/patient-admission")
+def get_patient_admission(
+    params: PatientLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    return _fetch_patient_table("patient_admission", params, conn)
+
+
+@app.get("/patient-diagnosis")
+def get_patient_diagnosis(
+    params: PatientLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    return _fetch_patient_table("patient_diagnosis", params, conn)
+
+
+@app.get("/patient-billheader")
+def get_patient_billheader(
+    params: PatientLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    return _fetch_patient_table("patient_billheader", params, conn)
+
+
+@app.get("/patient-progressnotes")
+def get_patient_progressnotes(
+    params: PatientLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    return _fetch_patient_table("patient_progressnotes", params, conn)
 
 
 class QueryRequest(BaseModel):
@@ -160,9 +219,6 @@ def run_named_query(
     q = NAMED_QUERIES.get(name)
     if q is None:
         raise HTTPException(status_code=404, detail=f"unknown query: {name}")
-    # Bind fixed params first, then call-time params from the query string
-    # (in declared order). User values only ever go through ? placeholders,
-    # so this is parameterized and safe; identifiers stay developer-controlled.
     try:
         bind = bind_params(q, request.query_params)
     except ValueError as exc:
