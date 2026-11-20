@@ -50,6 +50,18 @@ class PatientLookupParams:
     visit_number: str = Query(alias="VisitNumber", min_length=1)
 
 
+@dataclass
+class BillDetailLookupParams:
+    facility_code: str = Query(alias="FacilityCode", min_length=1)
+    bill_header_id: str = Query(alias="BillHeaderID", min_length=1)
+
+
+@dataclass
+class ProgressNoteFreeTextLookupParams:
+    facility_code: str = Query(alias="FacilityCode", min_length=1)
+    progress_note_id: str = Query(alias="ProgressNoteID", min_length=1)
+
+
 def _fetch_patient_table(
     table_name: str,
     params: PatientLookupParams,
@@ -74,13 +86,15 @@ def root():
         "/patient-admission",
         "/patient-diagnosis",
         "/patient-billheader",
+        "/patient-billdetail",
         "/patient-progressnotes",
+        "/patient-progressnotes-freetext"
     ]
     if settings.ENABLE_DEV_ENDPOINTS:
-        endpoints.extend(["/tables","/queries","/query"])
+        endpoints.extend(["/tables", "/queries", "/query"])
     return {
         "name": settings.APP_NAME,
-        "endpoints": endpoints
+        "endpoints": endpoints,
     }
 
 
@@ -143,12 +157,40 @@ def get_patient_billheader(
     return _fetch_patient_table("patient_billheader", params, conn)
 
 
+@app.get("/patient-billdetail")
+def get_patient_billdetail(
+    params: BillDetailLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    cur = conn.execute(
+        "SELECT * FROM [dbo].[patient_billdetail] "
+        "WHERE [FacilityCode] = ? AND [BillHeaderID] = ?",
+        params.facility_code,
+        params.bill_header_id,
+    )
+    return rows_to_json(cur)
+
+
 @app.get("/patient-progressnotes")
 def get_patient_progressnotes(
     params: PatientLookupParams = Depends(),
     conn: pyodbc.Connection = Depends(get_db),
 ):
     return _fetch_patient_table("patient_progressnotes", params, conn)
+
+
+@app.get("/patient-progressnotes-freetext")
+def get_patient_progressnotes_freetext(
+    params: ProgressNoteFreeTextLookupParams = Depends(),
+    conn: pyodbc.Connection = Depends(get_db),
+):
+    cur = conn.execute(
+        "SELECT * FROM [dbo].[patient_progressnotes_freetext] "
+        "WHERE [FacilityCode] = ? AND [ProgressNoteID] = ?",
+        params.facility_code,
+        params.progress_note_id,
+    )
+    return rows_to_json(cur)
 
 
 class QueryRequest(BaseModel):
@@ -170,7 +212,9 @@ def _assert_read_only(sql: str) -> str:
         raise HTTPException(status_code=400, detail="only SELECT / WITH queries are allowed")
     return stripped
 
+
 if settings.ENABLE_DEV_ENDPOINTS:
+
     @app.get("/tables")
     def list_tables(conn: pyodbc.Connection = Depends(get_db)):
         cur = conn.execute(
@@ -195,7 +239,6 @@ if settings.ENABLE_DEV_ENDPOINTS:
         except pyodbc.Error as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-
     @app.get("/queries")
     def list_queries():
         return [
@@ -207,7 +250,6 @@ if settings.ENABLE_DEV_ENDPOINTS:
             }
             for k, v in NAMED_QUERIES.items()
         ]
-
 
     @app.get("/queries/{name}")
     def run_named_query(
