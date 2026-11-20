@@ -4,6 +4,7 @@ from typing import Any
 
 import pyodbc
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
 from .config import settings
@@ -21,7 +22,22 @@ async def lifespan(app: FastAPI):
     log.info("shutting down %s", settings.APP_NAME)
 
 
-app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan, openapi_version="3.0.2")
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version="3.0.2",
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.get("/")
@@ -71,7 +87,7 @@ def list_tables(conn: pyodbc.Connection = Depends(get_db)):
 
 
 @app.get("/patients")
-def find_patients(
+def get_patient(
     facility_code: str = Query(alias="FacilityCode", min_length=1),
     pid: str = Query(alias="PID", min_length=1),
     visit_number: str = Query(alias="VisitNumber", min_length=1),
