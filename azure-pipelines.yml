@@ -7,13 +7,13 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  azureSubscription: 'Azure-CareDoct-Connection'
-  resourceGroupName: '<YOUR-RESOURCE-GROUP-NAME>'
-  acrName: '<YOUR-ACR-NAME>'
+  azureSubscription: 'a1h-da-main-rg-conn'
+  resourceGroupName: 'prod-bi-rg'
+  acrName: 'a1hdaacrsea'
   imageName: 'caredoct-api'
   webAppName: 'caredoct-api'
   apimServiceName: 'caredoct-api-apim'
-  apimApiId: '<YOUR-APIM-API-ID>'
+  apimApiId: 'caredoct-api'
   apimApiPath: 'icover'
 
 steps:
