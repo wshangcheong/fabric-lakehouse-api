@@ -67,20 +67,20 @@ def _fetch_patient_table(
 
 @app.get("/")
 def root():
+    endpoints = [
+        "/healthz",
+        "/readyz",
+        "/patient",
+        "/patient-admission",
+        "/patient-diagnosis",
+        "/patient-billheader",
+        "/patient-progressnotes",
+    ]
+    if settings.ENABLE_DEV_ENDPOINTS:
+        endpoints.extend(["/tables","/queries","/query"])
     return {
         "name": settings.APP_NAME,
-        "endpoints": [
-            "/healthz",
-            "/readyz",
-            "/tables",
-            "/patients",
-            "/patient-admission",
-            "/patient-diagnosis",
-            "/patient-billheader",
-            "/patient-progressnotes",
-            "/queries",
-            "/query",
-        ],
+        "endpoints": endpoints
     }
 
 
@@ -111,18 +111,7 @@ def readyz():
     return {"status": "ready"}
 
 
-@app.get("/tables")
-def list_tables(conn: pyodbc.Connection = Depends(get_db)):
-    cur = conn.execute(
-        "SELECT TABLE_SCHEMA, TABLE_NAME "
-        "FROM INFORMATION_SCHEMA.TABLES "
-        "WHERE TABLE_TYPE = 'BASE TABLE' "
-        "ORDER BY TABLE_SCHEMA, TABLE_NAME"
-    )
-    return rows_to_json(cur)
-
-
-@app.get("/patients")
+@app.get("/patient")
 def get_patient(
     params: PatientLookupParams = Depends(),
     conn: pyodbc.Connection = Depends(get_db),
@@ -181,50 +170,60 @@ def _assert_read_only(sql: str) -> str:
         raise HTTPException(status_code=400, detail="only SELECT / WITH queries are allowed")
     return stripped
 
+if settings.ENABLE_DEV_ENDPOINTS:
+    @app.get("/tables")
+    def list_tables(conn: pyodbc.Connection = Depends(get_db)):
+        cur = conn.execute(
+            "SELECT TABLE_SCHEMA, TABLE_NAME "
+            "FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_TYPE = 'BASE TABLE' "
+            "ORDER BY TABLE_SCHEMA, TABLE_NAME"
+        )
+        return rows_to_json(cur)
 
-@app.post("/query")
-def adhoc_query(req: QueryRequest, conn: pyodbc.Connection = Depends(get_db)):
-    """DEV ONLY: run an ad-hoc read query against the lakehouse.
+    @app.post("/query")
+    def adhoc_query(req: QueryRequest, conn: pyodbc.Connection = Depends(get_db)):
+        """DEV ONLY: run an ad-hoc read query against the lakehouse.
 
-    Useful while trying things out. Gate or remove this route (e.g. via APIM)
-    before production use.
-    """
-    sql = _assert_read_only(req.sql)
-    try:
-        cur = conn.execute(sql, *req.params)
-        return {"columns": [c[0] for c in cur.description], "rows": rows_to_json(cur)}
-    except pyodbc.Error as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.get("/queries")
-def list_queries():
-    return [
-        {
-            "name": k,
-            "sql": v["sql"],
-            "params": v.get("params", []),
-            "request_params": v.get("request_params", []),
-        }
-        for k, v in NAMED_QUERIES.items()
-    ]
+        Useful while trying things out. Gate or remove this route (e.g. via APIM)
+        before production use.
+        """
+        sql = _assert_read_only(req.sql)
+        try:
+            cur = conn.execute(sql, *req.params)
+            return {"columns": [c[0] for c in cur.description], "rows": rows_to_json(cur)}
+        except pyodbc.Error as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/queries/{name}")
-def run_named_query(
-    name: str,
-    request: Request,
-    conn: pyodbc.Connection = Depends(get_db),
-):
-    q = NAMED_QUERIES.get(name)
-    if q is None:
-        raise HTTPException(status_code=404, detail=f"unknown query: {name}")
-    try:
-        bind = bind_params(q, request.query_params)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    try:
-        cur = conn.execute(q["sql"], *bind)
-        return {"name": name, "columns": [c[0] for c in cur.description], "rows": rows_to_json(cur)}
-    except pyodbc.Error as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    @app.get("/queries")
+    def list_queries():
+        return [
+            {
+                "name": k,
+                "sql": v["sql"],
+                "params": v.get("params", []),
+                "request_params": v.get("request_params", []),
+            }
+            for k, v in NAMED_QUERIES.items()
+        ]
+
+
+    @app.get("/queries/{name}")
+    def run_named_query(
+        name: str,
+        request: Request,
+        conn: pyodbc.Connection = Depends(get_db),
+    ):
+        q = NAMED_QUERIES.get(name)
+        if q is None:
+            raise HTTPException(status_code=404, detail=f"unknown query: {name}")
+        try:
+            bind = bind_params(q, request.query_params)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            cur = conn.execute(q["sql"], *bind)
+            return {"name": name, "columns": [c[0] for c in cur.description], "rows": rows_to_json(cur)}
+        except pyodbc.Error as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
