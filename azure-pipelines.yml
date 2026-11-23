@@ -65,5 +65,5 @@ steps:
           --api-id "$(apimApiId)" \
           --path "$(apimApiPath)" \
           --specification-format OpenApiJson \
-          --specification-path "$(Build.ArtifactStagingDirectory)/openapi.json"
+          --specification-path "$(Build.ArtifactStagingDirectory)/openapi.json" \
           --subscription-required false
