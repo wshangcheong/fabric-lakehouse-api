@@ -6,7 +6,7 @@ from typing import Any
 import pyodbc
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from .config import settings
 from .db import get_connection, get_db, rows_to_json
@@ -48,6 +48,22 @@ class PatientLookupParams:
     facility_code: str = Query(alias="FacilityCode", min_length=1)
     pid: str = Query(alias="PID", min_length=1)
     visit_number: str = Query(alias="VisitNumber", min_length=1)
+
+
+class PatientLookupRequest(BaseModel):
+    lookups: list[str] = Field(min_length=1, max_length=700)
+
+    @field_validator("lookups")
+    @classmethod
+    def validate_lookups(cls, lookups: list[str]) -> list[str]:
+        for lookup in lookups:
+            parts = [part.strip() for part in lookup.split("|")]
+            if len(parts) != 3 or any(not part for part in parts):
+                raise ValueError(
+                    "each lookup must contain non-empty FacilityCode, PID, and VisitNumber "
+                    "values separated by '|'."
+                )
+        return lookups
 
 
 @dataclass
@@ -125,12 +141,25 @@ def readyz():
     return {"status": "ready"}
 
 
-@app.get("/patient")
+@app.post("/patient")
 def get_patient(
-    params: PatientLookupParams = Depends(),
+    params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient", params, conn)
+    lookups = [
+        tuple(part.strip() for part in lookup.split("|"))
+        for lookup in params.lookups
+    ]
+    predicates = [
+        "([FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?)"
+        for _ in lookups
+    ]
+    values = [value for lookup in lookups for value in lookup]
+    cur = conn.execute(
+        "SELECT * FROM [dbo].[patient] WHERE " + " OR ".join(predicates),
+        *values,
+    )
+    return {"rows": rows_to_json(cur)}
 
 
 @app.get("/patient-admission")

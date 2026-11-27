@@ -74,18 +74,42 @@ Open http://localhost:8000/docs for the interactive Swagger UI.
 
 ### Production Endpoints (Always Active)
 
-| Method | Path                             | Query Parameters                          | Purpose |
+| Method | Path                             | Parameters                                | Purpose |
 |--------|----------------------------------|-------------------------------------------|---------|
 | `GET`  | `/`                              | —                                         | Service info & active endpoint list |
 | `GET`  | `/healthz`                       | —                                         | Liveness probe (no data access) |
 | `GET`  | `/readyz`                        | —                                         | Readiness probe (Managed Identity auth + `SELECT 1`) |
-| `GET`  | `/patient`                       | `FacilityCode`, `PID`, `VisitNumber`      | Query `dbo.patient` |
+| `POST` | `/patient`                       | JSON body: `lookups` array of `FacilityCode|PID|VisitNumber` strings | Query `dbo.patient` |
 | `GET`  | `/patient-admission`             | `FacilityCode`, `PID`, `VisitNumber`      | Query `dbo.patient_admission` |
 | `GET`  | `/patient-diagnosis`             | `FacilityCode`, `PID`, `VisitNumber`      | Query `dbo.patient_diagnosis` |
 | `GET`  | `/patient-billheader`            | `FacilityCode`, `PID`, `VisitNumber`      | Query `dbo.patient_billheader` |
 | `GET`  | `/patient-billdetail`            | `FacilityCode`, `BillHeaderID`            | Query `dbo.patient_billdetail` |
 | `GET`  | `/patient-progressnotes`         | `FacilityCode`, `PID`, `VisitNumber`      | Query `dbo.patient_progressnotes` |
 | `GET`  | `/patient-progressnotes-freetext`| `FacilityCode`, `ProgressNoteID`          | Query `dbo.patient_progressnotes_freetext` |
+
+Example request and response for `POST /patient` (up to 700 lookups per request):
+
+```json
+{
+  "lookups": [
+    "FACILITY_CODE|PATIENT_ID|VISIT_NUMBER",
+    "FACILITY_CODE_2|PATIENT_ID_2|VISIT_NUMBER_2"
+  ]
+}
+```
+
+The response contains all matching records in the generic `rows` array:
+
+```json
+{
+  "rows": [
+    {
+      "PID": "PATIENT_ID",
+      "FacilityCode": "FACILITY_CODE"
+    }
+  ]
+}
+```
 
 ### Dev-Only Endpoints (`ENABLE_DEV_ENDPOINTS=true`)
 
