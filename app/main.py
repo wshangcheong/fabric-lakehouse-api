@@ -43,13 +43,6 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
-@dataclass
-class PatientLookupParams:
-    facility_code: str = Query(alias="FacilityCode", min_length=1)
-    pid: str = Query(alias="PID", min_length=1)
-    visit_number: str = Query(alias="VisitNumber", min_length=1)
-
-
 class PatientLookupRequest(BaseModel):
     lookups: list[str] = Field(min_length=1, max_length=700)
 
@@ -80,17 +73,23 @@ class ProgressNoteFreeTextLookupParams:
 
 def _fetch_patient_table(
     table_name: str,
-    params: PatientLookupParams,
+    params: PatientLookupRequest,
     conn: pyodbc.Connection,
-) -> list[dict[str, Any]]:
+) -> dict[str, list[dict[str, Any]]]:
+    lookups = [
+        tuple(part.strip() for part in lookup.split("|"))
+        for lookup in params.lookups
+    ]
+    predicates = [
+        "([FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?)"
+        for _ in lookups
+    ]
+    values = [value for lookup in lookups for value in lookup]
     cur = conn.execute(
-        f"SELECT * FROM [dbo].[{table_name}] "
-        "WHERE [FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?",
-        params.facility_code,
-        params.pid,
-        params.visit_number,
+        f"SELECT * FROM [dbo].[{table_name}] WHERE " + " OR ".join(predicates),
+        *values,
     )
-    return rows_to_json(cur)
+    return {"rows": rows_to_json(cur)}
 
 
 @app.get("/")
@@ -146,41 +145,28 @@ def get_patient(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    lookups = [
-        tuple(part.strip() for part in lookup.split("|"))
-        for lookup in params.lookups
-    ]
-    predicates = [
-        "([FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?)"
-        for _ in lookups
-    ]
-    values = [value for lookup in lookups for value in lookup]
-    cur = conn.execute(
-        "SELECT * FROM [dbo].[patient] WHERE " + " OR ".join(predicates),
-        *values,
-    )
-    return {"rows": rows_to_json(cur)}
+    return _fetch_patient_table("patient", params, conn)
 
 
-@app.get("/patient-admission")
+@app.post("/patient-admission")
 def get_patient_admission(
-    params: PatientLookupParams = Depends(),
+    params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
     return _fetch_patient_table("patient_admission", params, conn)
 
 
-@app.get("/patient-diagnosis")
+@app.post("/patient-diagnosis")
 def get_patient_diagnosis(
-    params: PatientLookupParams = Depends(),
+    params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
     return _fetch_patient_table("patient_diagnosis", params, conn)
 
 
-@app.get("/patient-billheader")
+@app.post("/patient-billheader")
 def get_patient_billheader(
-    params: PatientLookupParams = Depends(),
+    params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
     return _fetch_patient_table("patient_billheader", params, conn)
@@ -200,9 +186,9 @@ def get_patient_billdetail(
     return rows_to_json(cur)
 
 
-@app.get("/patient-progressnotes")
+@app.post("/patient-progressnotes")
 def get_patient_progressnotes(
-    params: PatientLookupParams = Depends(),
+    params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
     return _fetch_patient_table("patient_progressnotes", params, conn)
