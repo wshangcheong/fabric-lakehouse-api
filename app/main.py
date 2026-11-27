@@ -1,10 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import pyodbc
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field, field_validator
 
@@ -43,37 +42,38 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
-class PatientLookupRequest(BaseModel):
+class LookupBatchRequest(BaseModel):
     lookups: list[str] = Field(min_length=1, max_length=700)
+    lookup_part_count: ClassVar[int]
+    lookup_format: ClassVar[str]
 
     @field_validator("lookups")
     @classmethod
     def validate_lookups(cls, lookups: list[str]) -> list[str]:
         for lookup in lookups:
             parts = [part.strip() for part in lookup.split("|")]
-            if len(parts) != 3 or any(not part for part in parts):
+            if len(parts) != cls.lookup_part_count or any(not part for part in parts):
                 raise ValueError(
-                    "each lookup must contain non-empty FacilityCode, PID, and VisitNumber "
-                    "values separated by '|'."
+                    f"each lookup must contain {cls.lookup_part_count} non-empty values "
+                    f"({cls.lookup_format}) separated by '|'."
                 )
         return lookups
 
 
-@dataclass
-class BillDetailLookupParams:
-    facility_code: str = Query(alias="FacilityCode", min_length=1)
-    bill_header_id: str = Query(alias="BillHeaderID", min_length=1)
+class PatientLookupRequest(LookupBatchRequest):
+    lookup_part_count: ClassVar[int] = 3
+    lookup_format: ClassVar[str] = "FacilityCode, PID, and VisitNumber"
 
 
-@dataclass
-class ProgressNoteFreeTextLookupParams:
-    facility_code: str = Query(alias="FacilityCode", min_length=1)
-    progress_note_id: str = Query(alias="ProgressNoteID", min_length=1)
+class ItemLookupRequest(LookupBatchRequest):
+    lookup_part_count: ClassVar[int] = 2
+    lookup_format: ClassVar[str] = "FacilityCode and the endpoint-specific ID"
 
 
-def _fetch_patient_table(
+def _fetch_lookup_table(
     table_name: str,
-    params: PatientLookupRequest,
+    params: LookupBatchRequest,
+    columns: tuple[str, ...],
     conn: pyodbc.Connection,
 ) -> dict[str, list[dict[str, Any]]]:
     lookups = [
@@ -81,7 +81,7 @@ def _fetch_patient_table(
         for lookup in params.lookups
     ]
     predicates = [
-        "([FacilityCode] = ? AND [PID] = ? AND [VisitNumber] = ?)"
+        "(" + " AND ".join(f"[{column}] = ?" for column in columns) + ")"
         for _ in lookups
     ]
     values = [value for lookup in lookups for value in lookup]
@@ -145,7 +145,9 @@ def get_patient(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient", params, conn)
+    return _fetch_lookup_table(
+        "patient", params, ("FacilityCode", "PID", "VisitNumber"), conn
+    )
 
 
 @app.post("/patient-admission")
@@ -153,7 +155,9 @@ def get_patient_admission(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient_admission", params, conn)
+    return _fetch_lookup_table(
+        "patient_admission", params, ("FacilityCode", "PID", "VisitNumber"), conn
+    )
 
 
 @app.post("/patient-diagnosis")
@@ -161,7 +165,9 @@ def get_patient_diagnosis(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient_diagnosis", params, conn)
+    return _fetch_lookup_table(
+        "patient_diagnosis", params, ("FacilityCode", "PID", "VisitNumber"), conn
+    )
 
 
 @app.post("/patient-billheader")
@@ -169,21 +175,19 @@ def get_patient_billheader(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient_billheader", params, conn)
+    return _fetch_lookup_table(
+        "patient_billheader", params, ("FacilityCode", "PID", "VisitNumber"), conn
+    )
 
 
-@app.get("/patient-billdetail")
+@app.post("/patient-billdetail")
 def get_patient_billdetail(
-    params: BillDetailLookupParams = Depends(),
+    params: ItemLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    cur = conn.execute(
-        "SELECT * FROM [dbo].[patient_billdetail] "
-        "WHERE [FacilityCode] = ? AND [BillHeaderID] = ?",
-        params.facility_code,
-        params.bill_header_id,
+    return _fetch_lookup_table(
+        "patient_billdetail", params, ("FacilityCode", "BillHeaderID"), conn
     )
-    return rows_to_json(cur)
 
 
 @app.post("/patient-progressnotes")
@@ -191,26 +195,27 @@ def get_patient_progressnotes(
     params: PatientLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    return _fetch_patient_table("patient_progressnotes", params, conn)
+    return _fetch_lookup_table(
+        "patient_progressnotes", params, ("FacilityCode", "PID", "VisitNumber"), conn
+    )
 
 
-@app.get("/patient-progressnotes-freetext")
+@app.post("/patient-progressnotes-freetext")
 def get_patient_progressnotes_freetext(
-    params: ProgressNoteFreeTextLookupParams = Depends(),
+    params: ItemLookupRequest,
     conn: pyodbc.Connection = Depends(get_db),
 ):
-    cur = conn.execute(
-        "SELECT * FROM [dbo].[patient_progressnotes_freetext] "
-        "WHERE [FacilityCode] = ? AND [ProgressNoteID] = ?",
-        params.facility_code,
-        params.progress_note_id,
+    return _fetch_lookup_table(
+        "patient_progressnotes_freetext",
+        params,
+        ("FacilityCode", "ProgressNoteID"),
+        conn,
     )
-    return rows_to_json(cur)
 
 
 class QueryRequest(BaseModel):
     sql: str
-    params: list[Any] = []
+    params: list[Any] = Field(default_factory=list)
 
 
 def _assert_read_only(sql: str) -> str:

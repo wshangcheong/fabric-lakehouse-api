@@ -79,15 +79,17 @@ Open http://localhost:8000/docs for the interactive Swagger UI.
 | `GET`  | `/`                              | —                                         | Service info & active endpoint list |
 | `GET`  | `/healthz`                       | —                                         | Liveness probe (no data access) |
 | `GET`  | `/readyz`                        | —                                         | Readiness probe (Managed Identity auth + `SELECT 1`) |
-| `POST` | `/patient`                       | JSON body: `lookups` array of `FacilityCode|PID|VisitNumber` strings | Query `dbo.patient` |
-| `POST` | `/patient-admission`             | Same `lookups` body                       | Query `dbo.patient_admission` |
-| `POST` | `/patient-diagnosis`             | Same `lookups` body                       | Query `dbo.patient_diagnosis` |
-| `POST` | `/patient-billheader`            | Same `lookups` body                       | Query `dbo.patient_billheader` |
-| `GET`  | `/patient-billdetail`            | `FacilityCode`, `BillHeaderID`            | Query `dbo.patient_billdetail` |
-| `POST` | `/patient-progressnotes`         | Same `lookups` body                       | Query `dbo.patient_progressnotes` |
-| `GET`  | `/patient-progressnotes-freetext`| `FacilityCode`, `ProgressNoteID`          | Query `dbo.patient_progressnotes_freetext` |
+| `POST` | `/patient`                       | `lookups`: `FacilityCode|PID|VisitNumber` | Query `dbo.patient` |
+| `POST` | `/patient-admission`             | Same patient lookup format                | Query `dbo.patient_admission` |
+| `POST` | `/patient-diagnosis`             | Same patient lookup format                | Query `dbo.patient_diagnosis` |
+| `POST` | `/patient-billheader`            | Same patient lookup format                | Query `dbo.patient_billheader` |
+| `POST` | `/patient-billdetail`             | `lookups`: `FacilityCode|BillHeaderID`    | Query `dbo.patient_billdetail` |
+| `POST` | `/patient-progressnotes`         | Same patient lookup format                | Query `dbo.patient_progressnotes` |
+| `POST` | `/patient-progressnotes-freetext`| `lookups`: `FacilityCode|ProgressNoteID`  | Query `dbo.patient_progressnotes_freetext` |
 
-All five batch endpoints accept the same request body (up to 700 lookups per request):
+All seven data endpoints accept a JSON body with a `lookups` array (up to 700
+lookups per request). Each string must contain the endpoint's lookup values,
+separated by `|`, with no empty values:
 
 ```json
 {
@@ -98,7 +100,18 @@ All five batch endpoints accept the same request body (up to 700 lookups per req
 }
 ```
 
-The response contains all matching records in the generic `rows` array:
+For the ID-based endpoints, use the same format with two values, for example:
+
+```json
+{
+  "lookups": [
+    "FACILITY_CODE|BILL_HEADER_ID",
+    "FACILITY_CODE_2|BILL_HEADER_ID_2"
+  ]
+}
+```
+
+Responses contain all matching records in the generic `rows` array:
 
 ```json
 {
